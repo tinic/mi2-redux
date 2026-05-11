@@ -70,9 +70,12 @@ disks/*.adf
 !disks/README.md
 
 # Game data — user supplies these from their own legitimate copy.
-amiga-data/
-pc-data/
-boot-infra/
+# We track the per-dir README.md only so the directory exists with
+# instructions, but the actual game files never enter the repo.
+amiga-data/*
+!amiga-data/README.md
+pc-data/*
+!pc-data/README.md
 
 # Python / OS
 **/__pycache__/
