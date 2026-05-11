@@ -1,7 +1,7 @@
 #!/bin/bash
-# bootstrap.sh — one-shot setup of system packages + 3rd-party tools.
-# Run once on a fresh machine; afterwards ./build.sh produces the patched
-# game data and dist artefacts.
+# bootstrap.sh — one-shot setup of system packages + tool submodules.
+# Run once on a fresh machine; afterwards ./build.sh produces the
+# patched game data and dist artefacts.
 #
 # Supported platforms:
 #   - macOS (Homebrew)
@@ -9,28 +9,32 @@
 #
 # What this does:
 #   1. Install system packages: gcc-15 (for png2amiga's C++26 build),
-#      cmake, autoconf/automake (for lha-jca + scummvm-tools), git,
-#      python3 with venv + pip.
-#   2. Clone + build png2amiga from https://github.com/tinic/png2amiga
-#      into $PNG2AMIGA_DIR (default: ~/png2amiga). Build uses gcc-15
-#      because png2amiga targets the C++26 draft (-std=c++2c) and
-#      the LSP-only false positives don't affect the actual GCC build.
-#
-# After bootstrap, ./build.sh handles:
-#   - lha-jca (jca02266 fork; for read+write LHA archives)
-#   - python venv (amitools, Pillow)
-#   - scummvm-tools (descumm)
-#   - PyTexturePacker (clone-only, no build)
+#      cmake, autoconf/automake, git, python3 with venv + pip, plus
+#      SDL2 + libpng (scummvm + Pillow).
+#   2. Initialise + recursively fetch every submodule under tools/
+#      (.gitmodules pins each to a specific commit):
+#        - tools/png2amiga       https://github.com/tinic/png2amiga
+#        - tools/scummvm-tools   https://github.com/scummvm/scummvm-tools
+#        - tools/scummvm         https://github.com/scummvm/scummvm
+#        - tools/PyTexturePacker https://github.com/wo1fsea/PyTexturePacker
+#        - tools/lha-jca         https://github.com/jca02266/lha
+#   3. Apply the local scummvm patch (MD5 fallback so ScummVM accepts
+#      our patched-and-rehashed data files).
+#   4. Build each tool that needs compiling (png2amiga, scummvm,
+#      scummvm-tools, lha-jca).
+#   5. Create a Python venv with Pillow + amitools.
 #
 # Env vars:
-#   PNG2AMIGA_DIR    where to clone+build png2amiga (default: ~/png2amiga)
-#   SKIP_APT=1       skip system-package install (you've already done it)
+#   SKIP_APT=1     skip system-package install
+#   SKIP_SUBMOD=1  assume submodules already initialised
+#   SKIP_BUILDS=1  skip the compile steps (just system pkgs + clones)
+#
+# After bootstrap, ./build.sh produces patched game data + dist artefacts.
 
 set -euo pipefail
 cd "$(dirname "$0")"
-
-PNG2AMIGA_DIR="${PNG2AMIGA_DIR:-$HOME/png2amiga}"
-PNG2AMIGA_REPO="https://github.com/tinic/png2amiga.git"
+REPO_ROOT="$(pwd)"
+TOOLS="$REPO_ROOT/tools"
 
 # --- Detect platform -------------------------------------------------
 PLATFORM=""
@@ -56,84 +60,118 @@ else
     echo "==> Installing system packages"
     case "$PLATFORM" in
     macos)
-        # gcc        -> Homebrew's current GCC formula installs g++-15.
-        # cmake      -> png2amiga build (CMake 3.28+).
-        # autoconf,
-        # automake   -> lha-jca + scummvm-tools configure.
-        # git, python -> obvious. Homebrew Python keeps a venv-friendly
-        #               python3 separate from the macOS system Python.
-        brew install gcc cmake autoconf automake git python@3.13 || true
+        brew install gcc cmake autoconf automake git python@3.13 \
+                     sdl2 libpng || true
         ;;
     debian)
         sudo apt-get update -qq
         sudo apt-get install -y --no-install-recommends \
             build-essential cmake autoconf automake git \
-            python3 python3-venv python3-pip
-        # Debian 13 (trixie) ships gcc-14 by default; png2amiga needs
-        # gcc-15 for the C++26 draft features. Try the trixie/sid package
-        # first, then bookworm-backports, then warn.
+            python3 python3-venv python3-pip \
+            libsdl2-dev libpng-dev libfreetype6-dev libwxgtk3.2-dev || true
         if ! command -v g++-15 >/dev/null 2>&1; then
             if apt-cache show g++-15 >/dev/null 2>&1; then
                 sudo apt-get install -y g++-15 gcc-15
             else
-                echo
-                echo "WARNING: g++-15 not in apt cache."
-                echo "  Add a backports/snapshot repo or build GCC 15 from source."
-                echo "  png2amiga's cmake step below will likely fail."
-                echo
+                echo "WARNING: g++-15 not in apt cache; png2amiga build may fail."
             fi
         fi
         ;;
     esac
 fi
 
-# --- png2amiga --------------------------------------------------------
-echo "==> png2amiga at $PNG2AMIGA_DIR"
-if [ ! -d "$PNG2AMIGA_DIR" ]; then
-    echo "  Cloning $PNG2AMIGA_REPO (with submodules)"
-    git clone --recurse-submodules "$PNG2AMIGA_REPO" "$PNG2AMIGA_DIR"
+# --- Submodules ------------------------------------------------------
+if [ "${SKIP_SUBMOD:-0}" = "1" ]; then
+    echo "==> Skipping submodule init (SKIP_SUBMOD=1)"
 else
-    echo "  Repo present; pulling latest"
-    git -C "$PNG2AMIGA_DIR" pull --ff-only || \
-        echo "  (pull failed — keeping existing checkout)"
+    echo "==> Initialising submodules"
+    git -C "$REPO_ROOT" submodule update --init --recursive
 fi
-# png2amiga has third_party/ submodules (constixel, libwebp, ssimulacra2,
-# vscode-amiga-debug). Make sure they're populated whether this is a fresh
-# clone or an existing checkout that pre-dates the submodules.
-echo "  Updating submodules (third_party/*)"
-git -C "$PNG2AMIGA_DIR" submodule update --init --recursive
 
-PNG2AMIGA_BIN="$PNG2AMIGA_DIR/build/png2amiga"
-if [ ! -x "$PNG2AMIGA_BIN" ]; then
-    echo "  Building png2amiga (CMake + GCC 15)"
-    if ! command -v gcc-15 >/dev/null 2>&1 || ! command -v g++-15 >/dev/null 2>&1; then
-        echo "ERROR: gcc-15 / g++-15 not on PATH."
-        case "$PLATFORM" in
-        macos)
-            echo "  Try: brew install gcc"
-            echo "  (Homebrew's gcc formula ships g++-15 at /opt/homebrew/bin/g++-15)"
-            ;;
-        debian)
-            echo "  Try: sudo apt-get install gcc-15 g++-15"
-            echo "  (may require backports / snapshot repo on Debian 13)"
-            ;;
-        esac
+if [ "${SKIP_BUILDS:-0}" = "1" ]; then
+    echo "==> Skipping builds (SKIP_BUILDS=1)"
+    exit 0
+fi
+
+# --- png2amiga (C++26, GCC 15) ---------------------------------------
+echo "==> Building png2amiga"
+if [ ! -x "$TOOLS/png2amiga/build/png2amiga" ]; then
+    if ! command -v g++-15 >/dev/null 2>&1; then
+        echo "ERROR: g++-15 not on PATH (png2amiga needs C++26)."
+        echo "  macOS: brew install gcc"
+        echo "  Debian: sudo apt-get install gcc-15 g++-15"
         exit 1
     fi
-    cmake -B "$PNG2AMIGA_DIR/build" \
+    cmake -B "$TOOLS/png2amiga/build" \
           -DCMAKE_C_COMPILER=gcc-15 \
           -DCMAKE_CXX_COMPILER=g++-15 \
-          "$PNG2AMIGA_DIR"
-    cmake --build "$PNG2AMIGA_DIR/build" --parallel
+          "$TOOLS/png2amiga"
+    cmake --build "$TOOLS/png2amiga/build" --parallel
 fi
+echo "  png2amiga: $TOOLS/png2amiga/build/png2amiga"
 
-if [ ! -x "$PNG2AMIGA_BIN" ]; then
-    echo "ERROR: png2amiga binary missing after build: $PNG2AMIGA_BIN"
-    exit 1
+# --- scummvm-tools (descumm) -----------------------------------------
+echo "==> Building scummvm-tools (descumm)"
+if [ ! -x "$TOOLS/scummvm-tools/descumm" ]; then
+    pushd "$TOOLS/scummvm-tools" >/dev/null
+    ./configure --disable-wxwidgets >/dev/null
+    make descumm -j8
+    popd >/dev/null
 fi
-echo "  png2amiga: $PNG2AMIGA_BIN"
+echo "  descumm: $TOOLS/scummvm-tools/descumm"
+
+# --- lha-jca ---------------------------------------------------------
+echo "==> Building lha-jca"
+if [ ! -x "$TOOLS/lha-jca/src/lha" ]; then
+    pushd "$TOOLS/lha-jca" >/dev/null
+    aclocal && autoheader && automake --add-missing >/dev/null 2>&1 || true
+    autoconf
+    ./configure >/dev/null
+    make -j8
+    popd >/dev/null
+fi
+echo "  lha: $TOOLS/lha-jca/src/lha"
+
+# --- scummvm (with MD5-fallback patch) -------------------------------
+echo "==> Building scummvm (MI2-Amiga MD5-fallback patched)"
+SVMV_DETECT="$TOOLS/scummvm/engines/scumm/detection_internal.h"
+if ! grep -q '_mi2redux_fallback' "$SVMV_DETECT" 2>/dev/null; then
+    echo "  Applying MD5-fallback patch"
+    awk '
+      /static const MD5Table \*findInMD5Table/ {found=1}
+      found && /return r;/ && !patched {
+        print
+        print "\t// [mi2-redux] fallback for unknown MD5s — treat as Monkey Island 2 Amiga English"
+        print "\tstatic const MD5Table _mi2redux_fallback = {"
+        print "\t\t\"\", \"monkey2\", \"Amiga\", \"\", -1, Common::EN_ANY, Common::kPlatformAmiga"
+        print "\t};"
+        print "\treturn &_mi2redux_fallback;"
+        patched=1
+        next
+      }
+      {print}
+    ' "$SVMV_DETECT" > "$SVMV_DETECT.new"
+    mv "$SVMV_DETECT.new" "$SVMV_DETECT"
+fi
+if [ ! -x "$TOOLS/scummvm/scummvm" ]; then
+    pushd "$TOOLS/scummvm" >/dev/null
+    ./configure --backend=sdl --disable-all-engines --enable-engine=scumm \
+                >/dev/null 2>&1 || ./configure --backend=sdl
+    make -j8
+    popd >/dev/null
+fi
+echo "  scummvm: $TOOLS/scummvm/scummvm"
+
+# --- Python venv (Pillow + amitools) ---------------------------------
+echo "==> Python venv"
+if [ ! -d "$TOOLS/.venv" ]; then
+    python3 -m venv "$TOOLS/.venv"
+fi
+"$TOOLS/.venv/bin/pip" install --quiet --upgrade pip
+"$TOOLS/.venv/bin/pip" install --quiet Pillow amitools
+echo "  venv: $TOOLS/.venv"
 
 echo
 echo "==> Bootstrap complete."
-echo "    Run ./build.sh next."
-echo "    (set PNG2AMIGA=$PNG2AMIGA_BIN in your shell env if you used a non-default PNG2AMIGA_DIR)"
+echo "    Place game data files (see amiga-data/README.md, pc-data/README.md,"
+echo "    disks/README.md) and run ./build.sh."

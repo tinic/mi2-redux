@@ -8,17 +8,25 @@
 # never make it into this repo. They're either user-supplied or
 # regenerated locally by build.sh.
 
-# External tool clones / built binaries — fetch/build locally, not part of repo
+# External tool clones / built binaries.
+# Submodules (tracked at pinned commits via .gitmodules):
+#   tools/png2amiga, tools/scummvm-tools, tools/PyTexturePacker,
+#   tools/lha-jca, tools/scummvm.
+# Run `git submodule update --init --recursive` after cloning.
+# Anything below is NOT a submodule — pure local-only:
 tools/adflib/
 tools/adfcopy
 tools/adfreplace
 tools/jmonkey/
-tools/scummvm/
 tools/scummvm-patched/
-tools/scummvm-tools/
-tools/PyTexturePacker/
-tools/lha-jca/
 tools/.venv/
+
+# Build outputs inside the submodule checkouts (don't track CMake / Make
+# artefacts even though the source tree is tracked).
+tools/png2amiga/build/
+tools/scummvm-tools/build/
+tools/scummvm/build/
+tools/lha-jca/src/lha
 
 # Pre-decoded pristine asset cache (rebuilt from amiga-data/ at start of build.sh)
 tools/pristine_cache.pkl

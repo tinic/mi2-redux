@@ -32,17 +32,15 @@
 #   extracted-pc-pngs/...      PC bg + object PNGs (MISE Explorer extraction)
 #   pc-data/MONKEY2.0NN        PC data (for cross-room ref graph + family sheet)
 #
-# External tool dependencies:
-#   - System packages (gcc-15, cmake, autoconf/automake, python3-venv) and
-#     png2amiga itself: installed by ./bootstrap.sh (run once on a fresh
-#     machine; supports macOS via Homebrew and Debian 13 via apt-get).
-#   - lha-jca (built from source in tools/lha-jca/) — auto-built below.
-#   - amitools / Pillow (pip in tools/.venv) — auto-installed below.
-#   - scummvm-tools/descumm (cloned + built into tools/scummvm-tools/) — auto-built below.
-#   - PyTexturePacker (cloned into tools/PyTexturePacker/) — auto-cloned below.
+# External tool dependencies: all tracked as submodules under tools/,
+# pinned to a specific commit via .gitmodules. ./bootstrap.sh initialises
+# every submodule and builds the ones that need compiling
+# (png2amiga, scummvm, scummvm-tools, lha-jca) plus a Python venv with
+# Pillow + amitools. This script verifies they exist and bails with
+# instructions if they're missing.
 #
-# Override PNG2AMIGA env var if png2amiga lives somewhere other than
-# ~/png2amiga/build/png2amiga. The Python tools all honour this var.
+# Override PNG2AMIGA env var to use a manual png2amiga checkout instead
+# of the submodule build.
 
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -56,60 +54,31 @@ DIST="$REPO/dist"
 
 echo "==> Stage 1: tooling"
 
-# 1a. lha — Homebrew's `lhasa` is read-only. Build jca02266/lha from source
-#     (it can both read AND write LHA archives, which we need for stage 3).
-LHA_BIN="$TOOLS/lha-jca/src/lha"
-if [ ! -x "$LHA_BIN" ]; then
-    echo "Cloning + building jca02266/lha (read+write LHA)..."
-    if [ ! -d "$TOOLS/lha-jca" ]; then
-        git clone --depth 1 https://github.com/jca02266/lha.git "$TOOLS/lha-jca"
-    fi
-    pushd "$TOOLS/lha-jca" >/dev/null
-    autoreconf -fi
-    ./configure
-    make
-    popd >/dev/null
-fi
+# All external tools come from submodules; ./bootstrap.sh builds them
+# end-to-end. Just verify they exist here.
 
-# 1b. Python toolchain in a private venv (amitools/xdftool, Pillow for the
-#     room patcher). Activating the venv means every `python3` / `xdftool`
-#     call below uses this isolated environment.
-if [ ! -x "$VENV/bin/xdftool" ] || ! "$VENV/bin/python3" -c "import PIL" 2>/dev/null; then
-    echo "Setting up Python venv..."
-    python3 -m venv "$VENV"
-    "$VENV/bin/pip" install --quiet --upgrade pip
-    "$VENV/bin/pip" install --quiet amitools Pillow
-fi
-export PATH="$VENV/bin:$PATH"
-
-# 1c. scummvm-tools (descumm) — needed for cross-room ref graph
-if [ ! -x "$TOOLS/scummvm-tools/descumm" ]; then
-    echo "Cloning + building scummvm-tools..."
-    if [ ! -d "$TOOLS/scummvm-tools" ]; then
-        git clone --depth 1 https://github.com/scummvm/scummvm-tools.git "$TOOLS/scummvm-tools"
-    fi
-    pushd "$TOOLS/scummvm-tools" >/dev/null
-    ./configure --disable-wxwidgets >/dev/null
-    make descumm
-    popd >/dev/null
-fi
-
-# 1d. PyTexturePacker
-if [ ! -d "$TOOLS/PyTexturePacker" ]; then
-    echo "Cloning PyTexturePacker..."
-    git clone --depth 1 https://github.com/wo1fsea/PyTexturePacker.git "$TOOLS/PyTexturePacker"
-fi
-
-# 1e. png2amiga (provided by ./bootstrap.sh — clones the github repo and
-#     builds it with gcc-15 into ~/png2amiga/build/. Override PNG2AMIGA in
-#     the env to use a non-default install location.)
-PNG2AMIGA="${PNG2AMIGA:-$HOME/png2amiga/build/png2amiga}"
+PNG2AMIGA="${PNG2AMIGA:-$TOOLS/png2amiga/build/png2amiga}"
 export PNG2AMIGA
-if [ ! -x "$PNG2AMIGA" ]; then
-    echo "ERROR: png2amiga not found at $PNG2AMIGA"
-    echo "Run ./bootstrap.sh to clone + build it (or set PNG2AMIGA to an existing install)."
+LHA_BIN="$TOOLS/lha-jca/src/lha"
+DESCUMM="$TOOLS/scummvm-tools/descumm"
+
+missing=()
+[ -x "$PNG2AMIGA" ]              || missing+=("png2amiga ($PNG2AMIGA)")
+[ -x "$LHA_BIN" ]                || missing+=("lha-jca ($LHA_BIN)")
+[ -x "$DESCUMM" ]                || missing+=("descumm ($DESCUMM)")
+[ -d "$TOOLS/PyTexturePacker" ]  || missing+=("PyTexturePacker submodule")
+{ [ -d "$TOOLS/scummvm/.git" ] || [ -f "$TOOLS/scummvm/.git" ]; } \
+                                 || missing+=("scummvm submodule")
+[ -x "$VENV/bin/python3" ]       || missing+=("Python venv ($VENV)")
+
+if [ "${#missing[@]}" -gt 0 ]; then
+    echo "ERROR: external tools not built. Missing:"
+    printf "  - %s\n" "${missing[@]}"
+    echo
+    echo "Run ./bootstrap.sh to initialise submodules + build."
     exit 1
 fi
+export PATH="$VENV/bin:$PATH"
 
 # --- Stage 2 — patch all rooms ----------------------------------------
 # Skip if already up-to-date: SKIP_PATCH=1 ./build.sh re-uses the existing

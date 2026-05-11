@@ -1,0 +1,15 @@
+[submodule "tools/png2amiga"]
+	path = tools/png2amiga
+	url = https://github.com/tinic/png2amiga.git
+[submodule "tools/scummvm-tools"]
+	path = tools/scummvm-tools
+	url = https://github.com/scummvm/scummvm-tools.git
+[submodule "tools/PyTexturePacker"]
+	path = tools/PyTexturePacker
+	url = https://github.com/wo1fsea/PyTexturePacker.git
+[submodule "tools/lha-jca"]
+	path = tools/lha-jca
+	url = https://github.com/jca02266/lha.git
+[submodule "tools/scummvm"]
+	path = tools/scummvm
+	url = https://github.com/scummvm/scummvm.git
