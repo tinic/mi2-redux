@@ -1,0 +1,35 @@
+{
+  "_comment": "Hand-editable group definitions for shared multi-room costumes. Each group is encoded once globally; rooms that draw any of its cids lock that group's palette slots. Groups with the SAME pal_indices SHARE slot positions — each subgroup gets its own canonical RGBs, and a per-room lookup picks which subgroup's RGBs to lock based on which cid is drawn there. Built 2026-05-08; edit freely and re-run tools/encode_global_extras.py + tools/preview_groups.py.",
+  "groups": [
+    {
+      "name": "extras_a",
+      "_note": "Green-leaning subset of original extras_a (Largo's pirate gang in green coats, dancing girls, henchmen, small accessories)",
+      "cids": [4, 14, 122, 22],
+      "pal_indices": [2, 3, 4, 5, 6, 7, 8, 9]
+    },
+    {
+      "name": "extras_b",
+      "_note": "Warm-tone subset of original extras_a (pirates, sailors, officers, soldiers). SHARES slots [4..7] with extras_a_green and extras_a_flame — they're mutually exclusive per room (no two of these groups have a cid drawn in the same room). The optimizer is free to pick its own 4 centroids from these 8 character cids; no locks.",
+      "cids": [],
+      "pal_indices": []
+    },
+    {
+      "name": "extras_c",
+      "_note": "Just cid 27 (the campfire flame). Drawn only in rooms 4 and 5. Split out from extras_a_warm so locking flame colours doesn't starve the 8 character cids.",
+      "cids": [27],
+      "pal_indices": [2, 3, 4, 5, 6, 7, 8, 9]
+    },
+    {
+      "name": "extras_d",
+      "_note": "5 cids, 13 rooms",
+      "cids": [21, 26, 55, 65, 104, 2, 38, 47, 69, 86, 101, 98],
+      "pal_indices": [10, 11, 12, 13, 14, 15]
+    },
+    {
+      "name": "extras_e",
+      "_note": "3 cids, 6 rooms (slot 17 reserved white — skipped)",
+      "cids": [11, 50, 169, 18, 125, 16, 39, 28],
+      "pal_indices": [16, 18, 19, 20]
+    }
+  ]
+}
