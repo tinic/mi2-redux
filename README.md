@@ -35,9 +35,19 @@ cd mi2-redux
 ```
 
 Supported platforms: macOS via Homebrew, Debian 13 (trixie) / Ubuntu via
-`apt-get`. `bootstrap.sh` installs gcc-15 (png2amiga uses C++26 draft),
-SDL2 (for ScummVM), cmake, autoconf/automake, then initialises and
-builds every submodule:
+`apt-get`.
+
+**Prerequisite: GCC 15.** png2amiga is written against the C++26 draft
+(`-std=c++2c`) and won't compile with anything older. `bootstrap.sh`
+installs it for you on macOS (`brew install gcc`, which currently
+ships `g++-15` at `/opt/homebrew/bin/g++-15`) and Debian 13 (`apt-get
+install gcc-15 g++-15`). On older distros you'll need a backports/
+snapshot repo or to build GCC 15 from source — Clang (any version,
+including Apple's `/usr/bin/clang++`) does NOT work.
+
+`bootstrap.sh` also installs SDL2 (for ScummVM), cmake,
+autoconf/automake, Python 3 with venv, then initialises and builds
+every submodule:
 
 | submodule | what for |
 |---|---|
